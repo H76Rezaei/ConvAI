@@ -41,7 +41,10 @@ cp .env.example .env  # Add your OpenAI API key
 python run.py
 ```
 
-FRONTEND setup:
+### Frontend setup:
+
+```bash
 cd frontend
 npm install
 npm run dev
+```
