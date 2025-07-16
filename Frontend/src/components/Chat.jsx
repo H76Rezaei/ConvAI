@@ -25,14 +25,15 @@ const Chat = () => {
   const generateAIResponse = async (userMessage) => {
     setIsLoading(true);
 
+    const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
   
     try {
-      const response = await axios.post('http://127.0.0.1:8000/api/chat', {
+      const response = await axios.post(`${API_URL}/api/chat`, {
         message: userMessage,
         user_id: 'react_user'
-        }, {
+      }, {
         timeout: 3000 
-        });
+    });
 
       const aiMessage = {
         id: Date.now() + 1,
