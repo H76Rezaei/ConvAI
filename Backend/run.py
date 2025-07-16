@@ -3,18 +3,23 @@
 Startup script for FastAPI Chat Backend
 """
 
+import os
 import uvicorn
-from app.core.config import settings
 
 if __name__ == "__main__":
-    print(f"Starting {settings.app_name} v{settings.app_version}")
-    print(f"Running on http://{settings.host}:{settings.port}")
-    print(f"Debug mode: {settings.debug}")
+    # Use environment variables for deployment
+    host = os.environ.get("HOST", "0.0.0.0")
+    port = int(os.environ.get("PORT", 8000))
+    debug = os.environ.get("DEBUG", "false").lower() == "true"
+    
+    print(f"Starting FastAPI Chat Backend")
+    print(f"Running on http://{host}:{port}")
+    print(f"Debug mode: {debug}")
     
     uvicorn.run(
         "app.main:app",
-        host=settings.host,
-        port=settings.port,
-        reload=settings.debug,
-        log_level="info" if not settings.debug else "debug"
+        host=host,
+        port=port,
+        reload=debug,
+        log_level="info" if not debug else "debug"
     )
