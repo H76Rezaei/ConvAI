@@ -4,12 +4,12 @@ A full-stack chat application with AI memory capabilities using FastAPI, React, 
 
 ## Features
 
-- ✅ Real-time chat interface
-- ✅ OpenAI integration
-- ✅ Smart conversation memory (short-term + long-term)
-- ✅ Vector-based semantic search
-- ✅ Clean FastAPI backend
-- ✅ Modern React frontend with Tailwind CSS
+- Real-time chat interface
+- OpenAI integration
+- Smart conversation memory (short-term + long-term)
+- Vector-based semantic search
+- Clean FastAPI backend
+- Modern React frontend with Tailwind CSS
 
 ## Tech Stack
 
