@@ -29,8 +29,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",  # Local development
         "http://127.0.0.1:5173",  # Local development alternative
-        "https://*.vercel.app",   # Allow all Vercel apps (recommended)
-        # Or specifically: "https://your-app-name.vercel.app"
+        "https://conv-ai-six.vercel.app",  # Your Vercel app URL
     ],
     allow_credentials=True,
     allow_methods=["*"],
