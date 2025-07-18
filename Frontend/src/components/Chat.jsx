@@ -32,7 +32,7 @@ const Chat = () => {
         message: userMessage,
         user_id: 'react_user'
       }, {
-        timeout: 3000 
+        timeout: 10000 
     });
 
       const aiMessage = {
