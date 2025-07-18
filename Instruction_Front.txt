@@ -1,3 +1,0 @@
-cd ConvAI\Frontend
-npm run dev
-
