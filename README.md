@@ -2,7 +2,7 @@
 
 > AI chat that remembers and understands conversation context using vector embeddings and semantic search.
 
-🔗 **[Live Demo]((https://conv-ai-six.vercel.app)]** | 🚀 **[Backend API](https://convai-production.up.railway.app)**
+🔗 **[Live Demo](https://conv-ai-six.vercel.app)** | 🚀 **[Backend API](https://convai-production.up.railway.app)**
 
 ## Key Features
 
