@@ -8,8 +8,7 @@
 
 - **Intelligent Memory**: Finds relevant past conversations by meaning, not keywords
 - **Fast Responses**: Background memory storage, ~3 second response time
-- **Privacy**: User isolation with GDPR-compliant data deletion
-- **Semantic Search**: "chocolate cookies" matches "baking desserts"
+- **Semantic Search**: Connects related topics across conversations automatically
 
 ## Tech Stack
 
