@@ -1,3 +1,4 @@
+import os
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -15,6 +16,12 @@ import time
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Debug: Check environment variables at startup
+logger.info(f"OPENAI_API_KEY present: {bool(os.environ.get('OPENAI_API_KEY'))}")
+logger.info(f"PINECONE_API_KEY present: {bool(os.environ.get('PINECONE_API_KEY'))}")
+logger.info(f"Settings openai_api_key: {bool(settings.openai_api_key)}")
+logger.info(f"Settings pinecone_api_key: {bool(settings.pinecone_api_key)}")
+
 # Create FastAPI instance
 app = FastAPI(
     title=settings.app_name,
@@ -23,45 +30,27 @@ app = FastAPI(
     description="AI chat backend with OpenAI integration"
 )
 
-# Initialize OpenAI client with alternative configuration
-if settings.openai_api_key:
-    # Try different base URLs for Railway compatibility
-    base_urls_to_try = [
-        "https://api.openai.com/v1",
-        "https://api.openai.com/v1/",
-        None  # Default
-    ]
-    
-    for base_url in base_urls_to_try:
-        try:
-            openai_client = OpenAI(
-                api_key=settings.openai_api_key,
-                timeout=30.0,
-                max_retries=0,  # No retries, fail fast
-                base_url=base_url
-            )
-            # Test the connection immediately
-            test_response = openai_client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "user", "content": "test"}],
-                max_tokens=5,
-                timeout=10.0
-            )
-            logger.info(f"OpenAI connection successful with base_url: {base_url}")
-            break
-        except Exception as e:
-            logger.warning(f"Failed with base_url {base_url}: {e}")
-            openai_client = None
-            continue
-    
-    if not openai_client:
-        logger.error("All OpenAI connection attempts failed")
+# Initialize OpenAI client with direct environment check
+openai_api_key = os.environ.get("OPENAI_API_KEY") or settings.openai_api_key
+pinecone_api_key = os.environ.get("PINECONE_API_KEY") or settings.pinecone_api_key
+
+if openai_api_key:
+    logger.info("Initializing OpenAI client...")
+    openai_client = OpenAI(
+        api_key=openai_api_key,
+        timeout=30.0,
+        max_retries=0,
+    )
+    logger.info("OpenAI client initialized successfully")
 else:
+    logger.error("OpenAI API key not found!")
     openai_client = None
 
-if settings.pinecone_api_key:
-    pinecone_client = Pinecone(api_key=settings.pinecone_api_key)
+if pinecone_api_key:
+    logger.info("Pinecone API key found")
+    pinecone_client = Pinecone(api_key=pinecone_api_key)
 else:
+    logger.error("Pinecone API key not found!")
     pinecone_client = None
 
 app.add_middleware(
@@ -131,34 +120,28 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
         # Get smart memory instance for context retrieval only
         memory = get_memory_instance(settings.openai_api_key, settings.pinecone_api_key)
         
-        # TEMPORARY: Skip memory for Railway deployment
-        # relevant_context = []
-        
         # Get relevant context (recent + semantically similar)
         relevant_context = []
-        # Temporarily disable context retrieval for Railway
-        logger.info("Memory context disabled for Railway deployment")
-        
-        # if len(user_message) > 10:  # Only for substantial messages
-        #     try:
-        #         context_start = time.time()
-        #         relevant_context = memory.get_relevant_context(
-        #             user_id=user_id, 
-        #             current_message=user_message,
-        #             max_recent=2,      # Further reduced for reliability
-        #             max_retrieved=1    # Further reduced for reliability
-        #         )
-        #         context_time = time.time() - context_start
-        #         logger.info(f"Context retrieval took {context_time:.2f}s")
+        if len(user_message) > 10:  # Only for substantial messages
+            try:
+                context_start = time.time()
+                relevant_context = memory.get_relevant_context(
+                    user_id=user_id, 
+                    current_message=user_message,
+                    max_recent=2,      # Keep it small for Railway
+                    max_retrieved=1    # Keep it small for Railway
+                )
+                context_time = time.time() - context_start
+                logger.info(f"Context retrieval took {context_time:.2f}s")
                 
-        #         # If context retrieval takes too long, skip it
-        #         if context_time > 3.0:
-        #             logger.warning(f"Context retrieval too slow ({context_time:.2f}s), skipping for next requests")
-        #             relevant_context = []
+                # If context retrieval takes too long, skip it
+                if context_time > 3.0:
+                    logger.warning(f"Context retrieval too slow ({context_time:.2f}s), skipping")
+                    relevant_context = []
                     
-        #     except Exception as e:
-        #         logger.error(f"Context retrieval failed: {e}")
-        #         relevant_context = []  # Continue without context if it fails
+            except Exception as e:
+                logger.error(f"Context retrieval failed: {e}")
+                relevant_context = []  # Continue without context if it fails
         
         # Build messages for OpenAI
         messages = [
@@ -240,15 +223,13 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
         
         ai_response = response.choices[0].message.content
         
-        # TEMPORARY: Skip background memory storage for Railway
-        # background_tasks.add_task(
-        #     store_conversation_background,
-        #     user_id=user_id,
-        #     user_message=user_message,
-        #     ai_response=ai_response
-        # )
-        
-        logger.info("Background memory storage disabled for Railway deployment")
+        # Add memory storage as background task (happens after response is sent)
+        background_tasks.add_task(
+            store_conversation_background,
+            user_id=user_id,
+            user_message=user_message,
+            ai_response=ai_response
+        )
         
         total_time = time.time() - start_time
         logger.info(f"Total response time: {total_time:.2f}s (before background storage)")
@@ -265,32 +246,16 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
         logger.error(f"Error in chat endpoint: {e}")
         raise HTTPException(status_code=500, detail="Error processing your request")
 
-@app.get("/api/test-openai")
-async def test_openai():
-    """Test OpenAI connection"""
-    try:
-        if not openai_client:
-            return {"status": "error", "message": "OpenAI client not configured"}
-        
-        response = openai_client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[{"role": "user", "content": "Say 'test successful'"}],
-            max_tokens=10,
-            timeout=30.0
-        )
-        
-        return {
-            "status": "success", 
-            "message": "OpenAI connection working",
-            "response": response.choices[0].message.content
-        }
-    except Exception as e:
-        logger.error(f"OpenAI test failed: {e}")
-        return {
-            "status": "error", 
-            "message": f"OpenAI test failed: {str(e)}",
-            "error_type": type(e).__name__
-        }
+@app.get("/api/debug-config")
+async def debug_config():
+    """Debug configuration - DO NOT EXPOSE FULL KEYS IN PRODUCTION"""
+    return {
+        "openai_key_present": bool(settings.openai_api_key),
+        "openai_key_prefix": settings.openai_api_key[:7] + "..." if settings.openai_api_key else "None",
+        "pinecone_key_present": bool(settings.pinecone_api_key),
+        "openai_client_initialized": openai_client is not None,
+        "env_vars_count": len([k for k in os.environ.keys() if "API" in k.upper()])
+    }
 
 @app.get("/api/user/{user_id}/stats")
 async def get_user_stats(user_id: str):
