@@ -23,26 +23,13 @@ app = FastAPI(
     description="AI chat backend with OpenAI integration"
 )
 
-import httpx
-
-# Initialize OpenAI client with Railway-compatible HTTP client
+# Initialize OpenAI client with Railway-compatible settings
 if settings.openai_api_key:
-    # Create custom HTTP client for Railway compatibility
-    custom_client = httpx.Client(
-        timeout=httpx.Timeout(30.0),
-        limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
-        follow_redirects=True,
-        verify=True
-    )
-    
     openai_client = OpenAI(
         api_key=settings.openai_api_key,
-        timeout=30.0,
-        max_retries=3,
-        http_client=custom_client,
-        default_headers={
-            "User-Agent": "ConvAI/1.0",
-        }
+        timeout=60.0,  # Longer timeout for Railway
+        max_retries=1,  # Fewer retries
+        base_url="https://api.openai.com/v1",  # Explicit base URL
     )
 else:
     openai_client = None
@@ -171,11 +158,11 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
         try:
             logger.info(f"Calling OpenAI with {len(messages)} messages")
             response = openai_client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model="gpt-3.5-turbo-1106",  # Try specific version
                 messages=messages,
                 max_tokens=200,
                 temperature=0.7,
-                timeout=25.0  # Explicit timeout for this call
+                timeout=45.0  # Longer timeout
             )
             logger.info("OpenAI call successful")
         except Exception as openai_error:
@@ -244,16 +231,6 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
     except Exception as e:
         logger.error(f"Error in chat endpoint: {e}")
         raise HTTPException(status_code=500, detail="Error processing your request")
-
-@app.get("/api/health")
-async def health_check():
-    """Health check endpoint"""
-    return {
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "openai_configured": openai_client is not None,
-        "pinecone_configured": pinecone_client is not None
-    }
 
 @app.get("/api/test-openai")
 async def test_openai():
