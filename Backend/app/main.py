@@ -1,6 +1,5 @@
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from app.core.config import settings
 import uvicorn
 from datetime import datetime
@@ -23,9 +22,13 @@ app = FastAPI(
     description="AI chat backend with OpenAI integration"
 )
 
-# Initialize OpenAI client
+# Initialize OpenAI client with better configuration for Railway
 if settings.openai_api_key:
-    openai_client = OpenAI(api_key=settings.openai_api_key)
+    openai_client = OpenAI(
+        api_key=settings.openai_api_key,
+        timeout=30.0,  # Increase timeout for Railway environment
+        max_retries=2   # Reduce retries to fail faster
+    )
 else:
     openai_client = None
 
@@ -109,11 +112,17 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
                 relevant_context = memory.get_relevant_context(
                     user_id=user_id, 
                     current_message=user_message,
-                    max_recent=3,      # Reduced from 5 to 3 for faster retrieval
-                    max_retrieved=2    # Reduced from 3 to 2 for faster retrieval
+                    max_recent=2,      # Further reduced for reliability
+                    max_retrieved=1    # Further reduced for reliability
                 )
                 context_time = time.time() - context_start
                 logger.info(f"Context retrieval took {context_time:.2f}s")
+                
+                # If context retrieval takes too long, skip it
+                if context_time > 3.0:
+                    logger.warning(f"Context retrieval too slow ({context_time:.2f}s), skipping for next requests")
+                    relevant_context = []
+                    
             except Exception as e:
                 logger.error(f"Context retrieval failed: {e}")
                 relevant_context = []  # Continue without context if it fails
@@ -125,8 +134,18 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
         
         # Add the smart context (limit total context to avoid token limits)
         if relevant_context:
-            # Limit context to last 10 messages to avoid token overflow
-            limited_context = relevant_context[-10:] if len(relevant_context) > 10 else relevant_context
+            # Limit context to last 6 messages to avoid token overflow
+            limited_context = relevant_context[-6:] if len(relevant_context) > 6 else relevant_context
+            
+            # Calculate approximate token count
+            context_tokens = sum(len(msg["content"].split()) for msg in limited_context)
+            logger.info(f"Context: {len(limited_context)} messages, ~{context_tokens} tokens")
+            
+            # If still too large, further limit
+            if context_tokens > 800:  # Conservative token limit
+                limited_context = limited_context[-4:]
+                logger.warning("Further reduced context due to token size")
+            
             messages.extend(limited_context)
         
         # Add the new user message
@@ -134,12 +153,55 @@ async def chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks)
         
         # Call OpenAI with smart context
         response_start = time.time()
-        response = openai_client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=messages,
-            max_tokens=200,  # Slightly increased for better responses
-            temperature=0.7
-        )
+        try:
+            logger.info(f"Calling OpenAI with {len(messages)} messages")
+            response = openai_client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=messages,
+                max_tokens=200,
+                temperature=0.7,
+                timeout=25.0  # Explicit timeout for this call
+            )
+            logger.info("OpenAI call successful")
+        except Exception as openai_error:
+            logger.error(f"OpenAI call failed: {type(openai_error).__name__}: {openai_error}")
+            
+            # Fallback: try with minimal context
+            if len(messages) > 2:  # If we have context, try without it
+                logger.info("Retrying with minimal context...")
+                fallback_messages = [
+                    {"role": "system", "content": "You are a helpful AI assistant."},
+                    {"role": "user", "content": user_message}
+                ]
+                try:
+                    response = openai_client.chat.completions.create(
+                        model="gpt-3.5-turbo",
+                        messages=fallback_messages,
+                        max_tokens=150,
+                        temperature=0.7,
+                        timeout=20.0
+                    )
+                    logger.info("Fallback OpenAI call successful")
+                except Exception as fallback_error:
+                    logger.error(f"Fallback also failed: {fallback_error}")
+                    # Return a static response as last resort
+                    return {
+                        "user_message": user_message,
+                        "ai_response": "I'm experiencing some connectivity issues right now. Please try again in a moment.",
+                        "user_id": user_id,
+                        "timestamp": datetime.now().isoformat(),
+                        "error": "openai_connection_error"
+                    }
+            else:
+                # If minimal messages also fail, return error response
+                return {
+                    "user_message": user_message,
+                    "ai_response": "I'm having trouble connecting to the AI service. Please try again.",
+                    "user_id": user_id,
+                    "timestamp": datetime.now().isoformat(),
+                    "error": "openai_connection_error"
+                }
+                
         response_time = time.time() - response_start
         logger.info(f"OpenAI response took {response_time:.2f}s")
         

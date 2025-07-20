@@ -15,6 +15,8 @@ class Settings:
         self.pinecone_api_key = os.getenv("Pinecone_API_KEY")
         self.memory_max_recent_messages = int(os.getenv("MEMORY_MAX_RECENT", "5"))
         self.memory_max_retrieved = int(os.getenv("MEMORY_MAX_RETRIEVED", "3"))
+        self.openai_timeout = int(os.environ.get("OPENAI_TIMEOUT", "30"))
+        self.openai_max_retries = int(os.environ.get("OPENAI_MAX_RETRIES", "2"))
         
         # CORS settings for frontend
         allowed_origins_env = os.getenv("ALLOWED_ORIGINS", "")
