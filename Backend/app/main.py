@@ -1,5 +1,6 @@
 from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from app.core.config import settings
 import uvicorn
 from datetime import datetime
@@ -22,12 +23,26 @@ app = FastAPI(
     description="AI chat backend with OpenAI integration"
 )
 
-# Initialize OpenAI client with better configuration for Railway
+import httpx
+
+# Initialize OpenAI client with Railway-compatible HTTP client
 if settings.openai_api_key:
+    # Create custom HTTP client for Railway compatibility
+    custom_client = httpx.Client(
+        timeout=httpx.Timeout(30.0),
+        limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+        follow_redirects=True,
+        verify=True
+    )
+    
     openai_client = OpenAI(
         api_key=settings.openai_api_key,
-        timeout=30.0,  # Increase timeout for Railway environment
-        max_retries=2   # Reduce retries to fail faster
+        timeout=30.0,
+        max_retries=3,
+        http_client=custom_client,
+        default_headers={
+            "User-Agent": "ConvAI/1.0",
+        }
     )
 else:
     openai_client = None
@@ -239,6 +254,33 @@ async def health_check():
         "openai_configured": openai_client is not None,
         "pinecone_configured": pinecone_client is not None
     }
+
+@app.get("/api/test-openai")
+async def test_openai():
+    """Test OpenAI connection"""
+    try:
+        if not openai_client:
+            return {"status": "error", "message": "OpenAI client not configured"}
+        
+        response = openai_client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[{"role": "user", "content": "Say 'test successful'"}],
+            max_tokens=10,
+            timeout=30.0
+        )
+        
+        return {
+            "status": "success", 
+            "message": "OpenAI connection working",
+            "response": response.choices[0].message.content
+        }
+    except Exception as e:
+        logger.error(f"OpenAI test failed: {e}")
+        return {
+            "status": "error", 
+            "message": f"OpenAI test failed: {str(e)}",
+            "error_type": type(e).__name__
+        }
 
 @app.get("/api/user/{user_id}/stats")
 async def get_user_stats(user_id: str):
