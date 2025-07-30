@@ -135,21 +135,41 @@ class ConversationFormatter:
             f"- AI replied: {ai_response}"
         )
         '''
-
         return simple_format
+        
+    @staticmethod
+    def create_conversation_id(user_id: str, timestamp: str = None) -> str:
+        """
+        Create a conversation ID for grouping related messages
+        You can implement different strategies here
+        """
+        if not timestamp:
+            timestamp = datetime.now().isoformat()
+    
+        # Strategy 1: Daily conversations (group by date)
+        date_part = timestamp.split("T")[0]
+        return f"conv_{user_id}_{date_part}"
+    
+        # Strategy 2: Session-based (you'd need to track sessions)
+        # return f"conv_{user_id}_{session_id}"
+    
+        # Strategy 3: Topic-based (would need topic extraction)
+        # return f"conv_{user_id}_{topic_hash}"
+        
     
     @staticmethod
-    def create_metadata(user_id: str, user_message: str, ai_response: str, **kwargs) -> Dict[str, Any]:
+    def create_metadata(user_id: str, user_message: str, ai_response: str, session_id: str = None, **kwargs) -> Dict[str, Any]:
         """Create metadata dictionary for conversation"""
         base_metadata = {
             "user_id": user_id,
             "user_message": user_message,
             "ai_response": ai_response,
+            "session_id": session_id,  # Add this line
             "timestamp": datetime.now().isoformat(),
             "user_message_length": len(user_message),
             "ai_response_length": len(ai_response)
         }
-        
+    
         # Add any additional metadata
         base_metadata.update(kwargs)
         return base_metadata

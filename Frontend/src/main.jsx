@@ -7,6 +7,7 @@ import Chat from './components/Chat.jsx'
 import VoiceChat from './components/VoiceChat.jsx'
 import ChatSidebar from './components/ChatSidebar.jsx';
 import ChatHistory from './components/ChatHistory.jsx';
+import NewChat from './components/NewChat.jsx'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
@@ -17,6 +18,7 @@ createRoot(document.getElementById('root')).render(
         <Route path="/VoiceChat" element={<VoiceChat />} />
         <Route path="/ChatSidebar" element={<ChatSidebar />} />
         <Route path="/ChatHistory" element={<ChatHistory />} />
+        <Route path="/NewChat" element={<NewChat />} />
       </Routes>
     </BrowserRouter>
   </StrictMode>

@@ -4,8 +4,8 @@ import { IoIosSend } from "react-icons/io";
 import { FaMicrophone } from "react-icons/fa";
 import { RiVoiceprintFill } from "react-icons/ri";
 import { Loader } from 'lucide-react';
-import axios from 'axios'; 
 import ChatSidebar from './ChatSidebar';
+import api from '../utils/api';
 
 const Chat = () => {
 
@@ -18,22 +18,31 @@ const Chat = () => {
   const hasProcessedInitial = useRef(false);
   const messagesEndRef = useRef(null);
   const [chatTitle, setChatTitle] = useState("New Chat");
+  const [sessionId, setSessionId] = useState(null); 
 
-  // Get initial message from App page
+  // Get initial message from location state
   const initialMessage = location.state?.initialMessage;
+
+  useEffect(() => {
+    const token = localStorage.getItem('access_token');
+    if (!token) navigate('/');
+    }, []);
 
   const generateAIResponse = async (userMessage) => {
     setIsLoading(true);
 
-    const API_URL = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
-  
     try {
-      const response = await axios.post(`${API_URL}/api/chat`, {
-        message: userMessage,
-        user_id: 'react_user'
-      }, {
-        timeout: 10000 
+    const response = await api.post('/api/chat', {
+      message: userMessage,
+      session_id: sessionId // Send current session_id or null for new chat
     });
+
+    // Store the session_id from response for subsequent messages
+    if (response.data.session_id && !sessionId) {
+      setSessionId(response.data.session_id);
+      // Optionally store in localStorage for persistence
+      localStorage.setItem('current_session_id', response.data.session_id);
+    }
 
       const aiMessage = {
         id: Date.now() + 1,

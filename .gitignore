@@ -19,6 +19,7 @@ yarn-error.log*
 .npm
 
 # Database
+users.db
 memory_db/
 *.db
 *.sqlite

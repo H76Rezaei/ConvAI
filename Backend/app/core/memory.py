@@ -4,6 +4,7 @@ from langchain.schema import HumanMessage, AIMessage
 from pinecone import Pinecone
 from typing import List, Dict, Any
 import logging
+import uuid
 from .Pinecone_Utils import PineconeVectorStore, ConversationFormatter  
 
 class SmartConversationMemory:
@@ -32,23 +33,23 @@ class SmartConversationMemory:
                 memory_key="chat_history"
             )
         return self.user_memories[user_id]
-
-    def add_conversation_turn(self, user_id: str, user_message: str, ai_response: str):
+    
+    def add_conversation_turn(self, user_id: str, user_message: str, ai_response: str, session_id: str = None):
         """Add conversation to both buffer memory and vector store"""
         # Add to recent conversation buffer
         memory = self.get_conversation_memory(user_id)
         memory.save_context({"input": user_message}, {"output": ai_response})
-        
+    
         # Store in vector database
         try:
             conversation_text = ConversationFormatter.format_conversation(user_message, ai_response)
-
             embedding = self.embeddings.embed_query(conversation_text)
-            
+        
             metadata = ConversationFormatter.create_metadata(
                 user_id=user_id,
                 user_message=user_message,
-                ai_response=ai_response
+                ai_response=ai_response,
+                session_id=session_id or str(uuid.uuid4())[:8]  # Add session_id here
             )
 
             doc_id = self.vector_store.store_conversation(
@@ -57,12 +58,17 @@ class SmartConversationMemory:
                 embedding=embedding,
                 metadata=metadata
             )
-            
+        
             logging.info(f"Successfully added conversation turn for user {user_id}, doc_id: {doc_id}")
-            
+        
+            # Return the session_id
+            return metadata.get("session_id")
+        
         except Exception as e:
             logging.error(f"Error storing conversation in vector store: {e}")
             # Continue execution - buffer memory still works
+            return session_id or str(uuid.uuid4())[:8]
+
 
     def get_relevant_context(self, user_id: str, current_message: str, max_recent: int = 5, max_retrieved: int = 3) -> List[Dict[str, str]]:
         """Get context from both recent buffer and relevant past conversations"""
@@ -130,6 +136,76 @@ class SmartConversationMemory:
         except Exception as e:
             logging.error(f"Error deleting user conversations: {e}")
             return False
+
+
+    def get_conversation_list(self, user_id: str) -> List[Dict[str, Any]]:
+        """
+        Get list of conversation sessions for the UI 
+        """
+        try:
+            dummy_embedding = [0.0] * 1536
+            namespace = f"user_{user_id}"
+        
+            # Get recent conversations from Pinecone
+            results = self.vector_store.index.query(
+                vector=dummy_embedding,
+                namespace=namespace,
+                top_k=100,  # Get more to find different sessions
+                include_metadata=True
+            )
+        
+            if not results.get("matches"):
+                return []
+        
+            # Group by session_id instead of date
+            sessions = {}
+
+            for match in results["matches"]:
+                metadata = match.get("metadata", {})
+                session_id = metadata.get("session_id")  # We'll need to add this
+                timestamp = metadata.get("timestamp", "")
+                user_message = metadata.get("user_message", "")
+
+                if not user_message:
+                    continue
+            
+                # If no session_id, create one based on timestamp (for existing data)
+                if not session_id:
+                    # For existing data without session_id, group by hour
+                    if timestamp:
+                        # Group by date + hour (so conversations in same hour = same session)
+                        session_id = timestamp[:13]  # "2024-01-15T10" 
+                    else:
+                        session_id = "unknown"
+            
+                # Create or update session
+                if session_id not in sessions:
+                    sessions[session_id] = {
+                        "session_id": session_id,
+                        "title": user_message[:60] + "..." if len(user_message) > 60 else user_message,
+                        "preview": user_message[:80] + "..." if len(user_message) > 80 else user_message,
+                        "message_count": 1,
+                        "created_at": timestamp,
+                        "last_message_at": timestamp
+                    }
+                else:
+                    sessions[session_id]["message_count"] += 1
+                    # Keep the first message as title, update last_message_at
+                    if timestamp > sessions[session_id]["last_message_at"]:
+                        sessions[session_id]["last_message_at"] = timestamp
+                    if timestamp < sessions[session_id]["created_at"]:
+                        sessions[session_id]["created_at"] = timestamp
+        
+            # Convert to list and sort by last message (newest first)
+            session_list = list(sessions.values())
+            session_list.sort(key=lambda x: x["last_message_at"], reverse=True)
+        
+            return session_list[:20]  # Return last 20 sessions
+        
+        except Exception as e:
+            logging.error(f"Error getting conversation list: {e}")
+            return []
+
 
 # Global memory instance
 smart_memory = None
