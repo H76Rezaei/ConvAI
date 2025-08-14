@@ -14,6 +14,10 @@ JWT-based authentication with secure user registration and login. Implemented ro
 
 Built a two-tier memory system combining recent conversation context with semantic search across conversation history. Uses vector embeddings to retrieve relevant past discussions, enabling contextual responses that improve over time.
 
+**Document Processing Pipeline**
+
+Developed multi-format document parser supporting PDF, DOCX, and TXT files. Implements intelligent text chunking, vector embedding generation, and semantic search to enable AI responses based on uploaded document content.
+
 **Real-time Chat Interface**
 
 Integrated OpenAI GPT-3.5 with custom context management. Each conversation maintains session tracking while leveraging personalized conversation history for enhanced response quality.
