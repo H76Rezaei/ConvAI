@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { LuUserPen, LuLogOut, LuX } from "react-icons/lu"; 
-import { useNavigate } from "react-router-dom"; // Remove the duplicate import
+import { useNavigate } from "react-router-dom"; 
 import { FaCirclePlus } from "react-icons/fa6";
 import { MdOutlineHistory } from "react-icons/md";
 
@@ -10,9 +10,9 @@ const ChatSidebar = () => {
   const [isProfileOpen, setIsProfileOpen] = useState(false);
 
   const handleNewChat = () => {
-      localStorage.removeItem('current_session_id');
       navigate("/NewChat");
   };
+
   
   const handleChatHistory = () => {
       navigate("/ChatHistory");

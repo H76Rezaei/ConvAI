@@ -50,8 +50,9 @@ class PineconeVectorStore:
         doc_id = str(uuid.uuid4())
         
         try:
+            content_type = metadata.get('content_type', 'conversation')
             namespace = f"user_{user_id}"
-            
+
             # Add conversation_text to metadata for reference
             metadata_with_text = dict(metadata)
             metadata_with_text["conversation_text"] = conversation_text
@@ -62,10 +63,10 @@ class PineconeVectorStore:
             # Upsert into Pinecone with user namespace
             self.index.upsert(vectors=upsert_data, namespace=namespace)
             
-            logging.info(f"Successfully stored conversation {doc_id} for user {user_id}")
+            logging.info(f"Successfully stored {content_type} {doc_id} for user {user_id}")
             
         except Exception as e:
-            logging.error(f"Error storing conversation: {e}")
+            logging.error(f"Error storing content: {e}")
             raise
         
         return doc_id
@@ -105,6 +106,58 @@ class PineconeVectorStore:
         except Exception as e:
             logging.error(f"Error deleting user data: {e}")
             return False
+    def similarity_search_with_filter(self, user_id: str, query_embedding: List[float], 
+                                 top_k: int = 3, filter_condition: Dict = None) -> List[Dict[str, Any]]:
+        
+
+        try:
+            namespace = f"user_{user_id}"
+        
+            # Build the query
+            query_params = {
+                "vector": query_embedding,
+                "namespace": namespace,
+                "top_k": top_k,
+                "include_metadata": True
+            }
+        
+            # Add filter if provided
+            if filter_condition:
+                query_params["filter"] = filter_condition
+            
+            query_response = self.index.query(**query_params)
+
+            # After the query but before returning results:
+            logging.info(f"=== STORAGE DEBUG ===")
+            # Query without filter first to see what's actually stored
+            no_filter_response = self.index.query(
+                vector=query_embedding,
+                namespace=namespace,
+                top_k=10,
+                include_metadata=True
+            )
+            logging.info(f"Total items in namespace: {len(no_filter_response.get('matches', []))}")
+            for i, match in enumerate(no_filter_response.get('matches', [])[:3]):
+                metadata = match.get('metadata', {})
+                logging.info(f"Stored item {i}: document_id='{metadata.get('document_id')}', filename='{metadata.get('filename')}'")
+            logging.info(f"Looking for document_id: {filter_condition}")
+            logging.info(f"=== END STORAGE DEBUG ===")
+
+
+            results = []
+            for match in query_response.get("matches", []):
+                results.append({
+                    "id": match.get("id"),
+                    "score": match.get("score"),
+                    "metadata": match.get("metadata", {})
+                })
+        
+            logging.info(f"Filtered search found {len(results)} results in namespace {namespace}")
+            return results
+        
+        except Exception as e:
+            logging.error(f"Error in filtered similarity search: {e}")
+            return []
 
 class ConversationFormatter:
     """Helper class to format conversations for vector storage"""
@@ -117,54 +170,31 @@ class ConversationFormatter:
         """
         # Strategy 1: Simple (recommended for semantic search)
         simple_format = f"User: {user_message}\nAI: {ai_response}"
-        
-        '''
-        # Strategy 2: Context-rich (add flow markers and timestamp)
-        timestamp = datetime.now().isoformat()
-        context_rich_format = (
-            f"[Conversation Start] ({timestamp})\n"
-            f"[User Message]: {user_message}\n"
-            f"[AI Response]: {ai_response}\n"
-            f"[Conversation End]"
-        )
-
-        # Strategy 3: Semantic (placeholder for topic/entity extraction)
-        semantic_format = (
-            f"Key Points:\n"
-            f"- User said: {user_message}\n"
-            f"- AI replied: {ai_response}"
-        )
-        '''
         return simple_format
         
     @staticmethod
     def create_conversation_id(user_id: str, timestamp: str = None) -> str:
         """
         Create a conversation ID for grouping related messages
-        You can implement different strategies here
         """
         if not timestamp:
             timestamp = datetime.now().isoformat()
     
-        # Strategy 1: Daily conversations (group by date)
         date_part = timestamp.split("T")[0]
         return f"conv_{user_id}_{date_part}"
-    
-        # Strategy 2: Session-based (you'd need to track sessions)
-        # return f"conv_{user_id}_{session_id}"
-    
-        # Strategy 3: Topic-based (would need topic extraction)
-        # return f"conv_{user_id}_{topic_hash}"
-        
-    
+         
     @staticmethod
     def create_metadata(user_id: str, user_message: str, ai_response: str, session_id: str = None, **kwargs) -> Dict[str, Any]:
         """Create metadata dictionary for conversation"""
+        # Generate session_id if not provided
+        if not session_id:
+            session_id = str(uuid.uuid4())[:8]
         base_metadata = {
             "user_id": user_id,
+            "session_id": session_id,
             "user_message": user_message,
             "ai_response": ai_response,
-            "session_id": session_id,  # Add this line
+            "session_id": session_id,  
             "timestamp": datetime.now().isoformat(),
             "user_message_length": len(user_message),
             "ai_response_length": len(ai_response)
@@ -173,3 +203,64 @@ class ConversationFormatter:
         # Add any additional metadata
         base_metadata.update(kwargs)
         return base_metadata
+
+    def delete_document_chunks(self, user_id: str, document_id: str) -> bool:
+        """Delete all chunks for a specific document"""
+        try:
+            # Use documents namespace 
+            namespace = f"user_{user_id}_docs"
+        
+            # Query for all vectors with this document_id
+            query_response = self.index.query(
+                vector=[0.0] * 1536,  # OpenAI embeddings are 1536 dimensions
+                namespace=namespace,
+                filter={"document_id": {"$eq": document_id}},
+                top_k=10000,  
+                include_metadata=True, 
+                include_values=False  
+            )
+        
+            # Extract IDs to delete
+            ids_to_delete = [match["id"] for match in query_response.get("matches", [])]
+        
+            if ids_to_delete:
+                # Delete them by their IDs
+                self.index.delete(ids=ids_to_delete, namespace=namespace)
+                logging.info(f"Deleted {len(ids_to_delete)} chunks for document {document_id}")
+                return True
+            else:
+                logging.warning(f"No chunks found for document {document_id}")
+                return False
+            
+        except Exception as e:
+            logging.error(f"Error deleting document chunks: {e}")
+            return False
+
+    def delete_user_data(self, user_id: str) -> bool:
+        """Delete all data for a user (both conversations and documents)"""
+        try:
+            success = True
+        
+            # Delete conversation data
+            chat_namespace = f"user_{user_id}"
+            try:
+                self.index.delete(delete_all=True, namespace=chat_namespace)
+                logging.info(f"Deleted all conversation data for user {user_id}")
+            except Exception as e:
+                logging.error(f"Failed to delete conversation data for user {user_id}: {e}")
+                success = False
+        
+            # Delete document data
+            docs_namespace = f"user_{user_id}_docs"
+            try:
+                self.index.delete(delete_all=True, namespace=docs_namespace)
+                logging.info(f"Deleted all document data for user {user_id}")
+            except Exception as e:
+                logging.error(f"Failed to delete document data for user {user_id}: {e}")
+                success = False
+            
+            return success
+        
+        except Exception as e:
+            logging.error(f"Error deleting user data: {e}")
+            return False

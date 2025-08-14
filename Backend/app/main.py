@@ -1,4 +1,6 @@
 import os
+from pyexpat.errors import messages
+from urllib import request
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -13,7 +15,8 @@ from pinecone import Pinecone
 import logging
 import time
 import uuid
-from typing import Optional
+from typing import List, Optional
+from app.core.document_processor import DocumentProcessor
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -26,6 +29,9 @@ app = FastAPI(
     debug=settings.debug,
     description="AI chat backend with OpenAI integration and user authentication"  
 )
+from app.api.documents import router as documents_router
+
+app.include_router(documents_router)
 
 # Initialize OpenAI client with direct environment check
 openai_api_key = os.environ.get("OPENAI_API_KEY") or settings.openai_api_key
@@ -105,13 +111,13 @@ async def get_current_user_info(current_user: dict = Depends(get_current_user)):
 # ============= CHAT MODELS =============
 class ChatRequest(BaseModel):
     message: str
-    session_id: Optional[str] = None  # Optional session ID for continuing conversations
+    session_id: Optional[str] = None  
+    document_ids: Optional[List[str]] = None
 
 # ============= BACKGROUND TASKS =============
 async def store_conversation_background(user_id: str, user_message: str, ai_response: str, session_id: str = None):
     """
     Store conversation in memory as a background task with session support
-    This runs after the response is sent to the user
     """
     try:
         start_time = time.time()
@@ -120,8 +126,8 @@ async def store_conversation_background(user_id: str, user_message: str, ai_resp
         memory = get_memory_instance(settings.openai_api_key, settings.pinecone_api_key)
         
         # Store the conversation with session_id
-        returned_session_id = memory.add_conversation_turn(user_id, user_message, ai_response, session_id)
-        
+        returned_session_id = memory.add_conversation_turn(user_id, session_id, user_message, ai_response)
+
         storage_time = time.time() - start_time
         logger.info(f"Background memory storage completed in {storage_time:.2f}s for user {user_id}, session {returned_session_id}")
         
@@ -148,20 +154,49 @@ async def chat_endpoint(
     Chat endpoint with session support and authentication
     Each conversation has a unique session_id 
     """
+    logger.info(f"Chat request data: message='{request.message}', session_id={request.session_id}, document_ids={request.document_ids}")
     try:
         start_time = time.time()
         user_message = request.message.strip()
         user_id = str(current_user["user_id"])
-        session_id = request.session_id  # Get session_id from request (None for new conversations)
-        
+        session_id = request.session_id or str(uuid.uuid4())[:8]  # Generate session_id if not provided
+
         if not user_message:
             raise HTTPException(status_code=400, detail="Message cannot be empty")
-        
+
         if not openai_client:
             raise HTTPException(status_code=500, detail="OpenAI API key not configured")
-        
+
         # Get smart memory instance for context retrieval
         memory = get_memory_instance(settings.openai_api_key, settings.pinecone_api_key)
+
+        document_context = []
+        if request.document_ids:
+            try:
+                logger.info(f"Attempting to retrieve documents for user {user_id}: {request.document_ids}")
+                from app.core.document_processor import DocumentRetriever
+                retriever = DocumentRetriever(memory.embeddings, memory.vector_store)
+            
+                # Search user's documents
+                doc_results = await retriever.search_specific_documents(
+                    user_message, user_id, request.document_ids, top_k=5
+                )
+                if doc_results:
+                    document_context = [
+                        f"From document '{result['filename']}': {result['content'][:500]}..."
+                        for result in doc_results
+                    ]
+                    logger.info(f"Document context prepared for chat: {document_context}")
+                else:
+                    logger.warning(f"No relevant content found in documents for user {user_id}")
+                    document_context = [
+                        f"I can see you've uploaded documents, but I couldn't find relevant content for your question. You can ask me to summarize the document or ask more specific questions about it."
+                    ]
+            except Exception as e:
+                logger.error(f"Error retrieving documents for user {user_id}: {e}")
+                document_context = [
+                    "I'm having trouble accessing your uploaded documents right now. Please try asking your question again."
+                ]
         
         # Get relevant context (recent + semantically similar)
         relevant_context = []
@@ -170,14 +205,12 @@ async def chat_endpoint(
                 context_start = time.time()
                 relevant_context = memory.get_relevant_context(
                     user_id=user_id, 
+                    session_id=session_id,
                     current_message=user_message,
-                    max_recent=2,      # Keep it small for Railway
-                    max_retrieved=1    # Keep it small for Railway
+                    max_recent=2,    
+                    max_retrieved=1 
                 )
                 context_time = time.time() - context_start
-                logger.info(f"Context retrieval took {context_time:.2f}s")
-                
-                # If context retrieval takes too long, skip it
                 if context_time > 3.0:
                     logger.warning(f"Context retrieval too slow ({context_time:.2f}s), skipping")
                     relevant_context = []
@@ -187,18 +220,35 @@ async def chat_endpoint(
                 relevant_context = []  # Continue without context if it fails
         
         # Build messages for OpenAI
+        if document_context:
+            system_prompt = f"""You are an AI assistant helping {current_user['username']}. 
+
+                IMPORTANT: You have direct access to the content of their uploaded documents. When they ask about the documents:
+                - Read the content directly and answer specifically
+                - Quote exact text when relevant  
+                - Don't say you "can't access" or "don't have access" to documents
+                - Be confident and direct
+                The user has uploaded documents and expects you to read and analyze them."""
+        else:
+            system_prompt = f"You are a helpful AI assistant talking to {current_user['username']}. Use the conversation history to provide personalized and contextual responses."
+
         messages = [
-            {"role": "system", "content": f"You are a helpful AI assistant talking to {current_user['username']}. Use the conversation history to provide personalized and contextual responses."}
-        ]
-        
-        # Add the smart context (limit total context to avoid token limits)
+            {"role": "system", "content": system_prompt}
+            ]
+        if document_context:
+            doc_context_message = {
+                "role": "system", 
+                "content": f"Relevant document content:\n\n{chr(10).join(document_context)}"
+            }
+            messages.append(doc_context_message)
+
+        # Smart context
         if relevant_context:
             # Limit context to last 6 messages to avoid token overflow
             limited_context = relevant_context[-6:] if len(relevant_context) > 6 else relevant_context
             
             # Calculate approximate token count
             context_tokens = sum(len(msg["content"].split()) for msg in limited_context)
-            logger.info(f"Context: {len(limited_context)} messages, ~{context_tokens} tokens")
             
             # If still too large, further limit
             if context_tokens > 800:  # Conservative token limit
@@ -213,13 +263,12 @@ async def chat_endpoint(
         # Call OpenAI with smart context
         response_start = time.time()
         try:
-            logger.info(f"Calling OpenAI with {len(messages)} messages for user {current_user['username']}")
             response = openai_client.chat.completions.create(
-                model="gpt-3.5-turbo-1106",  # Try specific version
+                model="gpt-3.5-turbo-1106",  
                 messages=messages,
                 max_tokens=200,
                 temperature=0.7,
-                timeout=45.0  # Longer timeout
+                timeout=45.0 
             )
             logger.info("OpenAI call successful")
         except Exception as openai_error:
@@ -243,26 +292,16 @@ async def chat_endpoint(
                     logger.info("Fallback OpenAI call successful")
                 except Exception as fallback_error:
                     logger.error(f"Fallback also failed: {fallback_error}")
-                    # Return a static response as last resort
                     return {
                         "user_message": user_message,
                         "ai_response": f"Hi {current_user['username']}, I'm experiencing some connectivity issues right now. Please try again in a moment.",
                         "user_id": user_id,
-                        "session_id": session_id or str(uuid.uuid4())[:8],
+                        "session_id": session_id,
                         "timestamp": datetime.now().isoformat(),
+                        "documents_found": len(document_context) if document_context else 0,
                         "error": "openai_connection_error"
                     }
-            else:
-                # If minimal messages also fail, return error response
-                return {
-                    "user_message": user_message,
-                    "ai_response": f"Hi {current_user['username']}, I'm having trouble connecting to the AI service. Please try again.",
-                    "user_id": user_id,
-                    "session_id": session_id or str(uuid.uuid4())[:8],
-                    "timestamp": datetime.now().isoformat(),
-                    "error": "openai_connection_error"
-                }
-                
+
         response_time = time.time() - response_start
         logger.info(f"OpenAI response took {response_time:.2f}s")
         
@@ -270,16 +309,16 @@ async def chat_endpoint(
         
         # Generate session_id if not provided (new conversation)
         if not session_id:
-            session_id = str(uuid.uuid4())[:8]  # Short session ID like "a1b2c3d4"
+            session_id = str(uuid.uuid4())[:8]  
             logger.info(f"Created new session {session_id} for user {current_user['username']}")
         
         # Add memory storage as background task with session_id
         background_tasks.add_task(
             store_conversation_background,
             user_id=user_id,
+            session_id=session_id,
             user_message=user_message,
-            ai_response=ai_response,
-            session_id=session_id
+            ai_response=ai_response
         )
         
         total_time = time.time() - start_time
@@ -289,8 +328,8 @@ async def chat_endpoint(
             "user_message": user_message,
             "ai_response": ai_response,
             "user_id": user_id,
+            "session_id": session_id,
             "username": current_user['username'],
-            "session_id": session_id,  # Return session_id to frontend
             "timestamp": datetime.now().isoformat(),
             "response_time": round(total_time, 2)
         }
@@ -298,82 +337,6 @@ async def chat_endpoint(
     except Exception as e:
         logger.error(f"Error in chat endpoint: {e}")
         raise HTTPException(status_code=500, detail="Error processing your request")
-
-# ============= CONVERSATION MANAGEMENT =============
-@app.get("/api/conversations", tags=["Conversations"])
-async def get_user_conversations(current_user: dict = Depends(get_current_user)):
-    """Get all conversation sessions for the current user (like Claude's sidebar)"""
-    try:
-        user_id = str(current_user["user_id"])
-        memory = get_memory_instance(settings.openai_api_key, settings.pinecone_api_key)
-        
-        # Get conversation list (you'll implement this in memory.py)
-        conversations = memory.get_conversation_list(user_id)
-        
-        logger.info(f"Retrieved {len(conversations)} conversations for user {current_user['username']}")
-        
-        return {
-            "conversations": conversations,
-            "user_id": user_id,
-            "username": current_user['username'],
-            "total_conversations": len(conversations)
-        }
-    except Exception as e:
-        logger.error(f"Error getting conversations: {e}")
-        # Return empty list if method doesn't exist yet
-        return {
-            "conversations": [],
-            "user_id": str(current_user["user_id"]),
-            "username": current_user['username'],
-            "note": "Conversation list feature not implemented yet"
-        }
-
-@app.get("/api/conversations/{session_id}", tags=["Conversations"])
-async def get_conversation_details(
-    session_id: str, 
-    current_user: dict = Depends(get_current_user)
-):
-    """Get all messages from a specific conversation session"""
-    try:
-        user_id = str(current_user["user_id"])
-        memory = get_memory_instance(settings.openai_api_key, settings.pinecone_api_key)
-        
-        # Get messages for this session (you'll implement this in memory.py)
-        # For now, return a placeholder
-        conversation = {
-            "session_id": session_id,
-            "messages": [],
-            "user_id": user_id,
-            "note": "Session detail feature not implemented yet"
-        }
-        
-        return conversation
-        
-    except Exception as e:
-        logger.error(f"Error getting conversation details: {e}")
-        raise HTTPException(status_code=500, detail="Error retrieving conversation details")
-
-@app.delete("/api/conversations/{session_id}", tags=["Conversations"])
-async def delete_conversation(
-    session_id: str,
-    current_user: dict = Depends(get_current_user)
-):
-    """Delete a specific conversation session"""
-    try:
-        user_id = str(current_user["user_id"])
-        # TODO: Implement session deletion in memory.py
-        
-        logger.info(f"Deleted session {session_id} for user {current_user['username']}")
-        
-        return {
-            "message": "Conversation deleted successfully",
-            "session_id": session_id,
-            "user_id": user_id
-        }
-        
-    except Exception as e:
-        logger.error(f"Error deleting conversation: {e}")
-        raise HTTPException(status_code=500, detail="Error deleting conversation")
 
 # ============= USER MANAGEMENT =============
 @app.delete("/api/user/data", tags=["User Management"])
@@ -450,55 +413,6 @@ async def health_check():
         "timestamp": datetime.now().isoformat()
     }
 
-# ============= OPTIONAL: PUBLIC ENDPOINT FOR TESTING =============
-@app.post("/api/chat/public", tags=["Public"])
-async def public_chat_endpoint(request: ChatRequest, background_tasks: BackgroundTasks):
-    """
-    Public chat endpoint for testing (no authentication required)
-    Remove this once authentication is fully implemented in frontend
-    """
-    user_id = "anonymous"
-    
-    try:
-        start_time = time.time()
-        user_message = request.message.strip()
-        
-        if not user_message:
-            raise HTTPException(status_code=400, detail="Message cannot be empty")
-        
-        if not openai_client:
-            raise HTTPException(status_code=500, detail="OpenAI API key not configured")
-        
-        # Simple response without memory for public endpoint
-        messages = [
-            {"role": "system", "content": "You are a helpful AI assistant."},
-            {"role": "user", "content": user_message}
-        ]
-        
-        response = openai_client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=messages,
-            max_tokens=150,
-            temperature=0.7,
-            timeout=20.0
-        )
-        
-        ai_response = response.choices[0].message.content
-        total_time = time.time() - start_time
-        
-        return {
-            "user_message": user_message,
-            "ai_response": ai_response,
-            "user_id": user_id,
-            "session_id": "public",
-            "timestamp": datetime.now().isoformat(),
-            "response_time": round(total_time, 2),
-            "note": "This is a public endpoint - sign up for personalized memory and conversations!"
-        }
-        
-    except Exception as e:
-        logger.error(f"Error in public chat endpoint: {e}")
-        raise HTTPException(status_code=500, detail="Error processing your request")
 
 if __name__ == "__main__":
     uvicorn.run(
