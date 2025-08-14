@@ -1,0 +1,28 @@
+# Python virtual environments
+venv/
+env/
+ENV/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Database files (we don't want to bake these into the image)
+*.db
+*.sqlite
+users.db
+memory_db/
+
+# Development files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment files 
+.env
+.env.local

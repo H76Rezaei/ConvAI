@@ -59,6 +59,7 @@ else:
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
+        "http://localhost:3000",  # Docker 
         "http://localhost:5173",  # Local development
         "http://127.0.0.1:5173",  # Local development alternative
         "https://conv-ai-six.vercel.app",  # Vercel app URL

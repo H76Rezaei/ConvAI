@@ -4,7 +4,40 @@
 
 🔗 **[Live Demo](https://conv-ai-six.vercel.app)** | 🚀 **[Backend API](https://convai-production.up.railway.app)**
 
+## Docker Implementation
+
+**Full containerization with production-ready optimizations:**
+
+```bash
+# One-command setup - entire stack ready in minutes
+git clone https://github.com/H76Rezaei/ConvAI.git
+cd ConvAI
+docker compose up --build
+
+# Access app:
+# Frontend: http://localhost:3000
+# Backend API: http://localhost:8000
+```
+
+Docker containerization with multi-stage builds, service orchestration, and production-ready configurations.
+
+**Architecture:**
+
+```bash
+# Frontend: Optimized multi-stage build
+FROM node:18-alpine AS build    # Build stage
+FROM nginx:alpine              # Production stage (90% smaller!)
+
+# Backend: Secure containerization
+FROM python:3.11-slim          # Minimal base image
+USER appuser                   # Non-root security
+```
+
 ## Key Features
+
+**Dockerized Full-Stack Deployment**
+
+Complete containerization with multi-stage builds and service orchestration. Deploy entire stack with `docker compose up`.
 
 **User Authentication System**
 
