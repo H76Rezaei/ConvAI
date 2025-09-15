@@ -13,3 +13,13 @@ python-multipart==0.0.20
 pydantic[email]
 PyPDF2==3.0.1
 python-docx==1.2.0
+
+# Testing dependencies
+pytest==8.3.4
+pytest-asyncio==0.24.0
+pytest-cov==6.0.0
+httpx==0.28.1
+flake8==7.1.1
+black==24.10.0
+bandit==1.7.10
+safety==3.2.7

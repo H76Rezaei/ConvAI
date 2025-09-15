@@ -16,8 +16,8 @@ logger = logging.getLogger(__name__)
 security = HTTPBearer()
 
 class AuthManager:
-    def __init__(self, db_path: str = "users.db", secret_key: str = None):
-        self.db_path = db_path
+    def __init__(self, db_path: str = None, secret_key: str = None):
+        self.db_path = db_path or os.getenv("TEST_DB_PATH", "users.db")
         self.secret_key = secret_key or os.getenv("JWT_SECRET_KEY", "your-default-secret-key-change-in-production")
         self.init_db()
     
@@ -165,8 +165,15 @@ class AuthManager:
             logger.error(f"Error verifying token: {e}")
             return None
 
-# Global auth instance
-auth_manager = AuthManager()
+# Global auth instance - will be initialized when needed
+auth_manager = None
+
+def get_auth_manager():
+    """Get or create the global auth manager instance"""
+    global auth_manager
+    if auth_manager is None:
+        auth_manager = AuthManager()
+    return auth_manager
 
 # Pydantic models for request/response
 class UserRegister(BaseModel):
@@ -202,7 +209,8 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     Usage: current_user: dict = Depends(get_current_user)
     """
     try:
-        user_data = auth_manager.verify_token(credentials.credentials)
+        auth_mgr = get_auth_manager()
+        user_data = auth_mgr.verify_token(credentials.credentials)
         if not user_data:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,

@@ -5,21 +5,28 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   plugins: [react()],
   
-  // Add these for deployment:
   build: {
     outDir: 'dist',
-    sourcemap: false, 
+    sourcemap: false,
   },
   
   // Server config for development
   server: {
     port: 5173,
-    host: true, 
+    host: true,
   },
-  
-  
+       
   preview: {
     port: 4173,
     host: true,
-  }
+  },
+
+  // Test configuration for Vitest
+  test: {
+    globals: true,
+    environment: 'jsdom',
+    setupFiles: './src/test/setup.js',
+    mockReset: true,
+    clearMocks: true,
+  },
 })

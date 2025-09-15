@@ -10,7 +10,7 @@ from datetime import datetime
 from openai import OpenAI
 from pydantic import BaseModel
 from app.core.memory import get_memory_instance
-from app.auth import auth_manager, UserRegister, UserLogin, get_current_user  
+from app.auth import get_auth_manager, UserRegister, UserLogin, get_current_user  
 from pinecone import Pinecone
 import logging
 import time
@@ -73,14 +73,15 @@ app.add_middleware(
 @app.post("/auth/register", tags=["Authentication"])
 async def register(user_data: UserRegister):
     """Register a new user"""
-    user = auth_manager.create_user(user_data.email, user_data.username, user_data.password)
+    auth_mgr = get_auth_manager()
+    user = auth_mgr.create_user(user_data.email, user_data.username, user_data.password)
     if not user:
         raise HTTPException(
             status_code=400,
             detail="Email or username already registered"
         )
     
-    token = auth_manager.create_token(user)
+    token = auth_mgr.create_token(user)
     return {
         "user": user,
         "access_token": token,
@@ -90,14 +91,15 @@ async def register(user_data: UserRegister):
 @app.post("/auth/login", tags=["Authentication"])
 async def login(user_credentials: UserLogin):
     """Login user"""
-    user = auth_manager.authenticate_user(user_credentials.email, user_credentials.password)
+    auth_mgr = get_auth_manager()
+    user = auth_mgr.authenticate_user(user_credentials.email, user_credentials.password)
     if not user:
         raise HTTPException(
             status_code=401,
             detail="Invalid email or password"
         )
     
-    token = auth_manager.create_token(user)
+    token = auth_mgr.create_token(user)
     return {
         "user": user,
         "access_token": token,
