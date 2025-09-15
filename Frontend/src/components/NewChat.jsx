@@ -40,7 +40,7 @@ function NewChat() {
 
   return (
     <>
-      <div className="bg-stone-100 h-screen flex"> 
+      <div className="bg-stone-200 h-screen flex"> 
         <div className="w-16">
           <ChatSidebar />
         </div>

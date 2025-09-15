@@ -89,7 +89,7 @@ function App() {
       localStorage.setItem("user", JSON.stringify(response.data.user));
       
       setSuccessMessage("Registration successful!");
-      setTimeout(() => navigate("/Chat"), 1500);
+      setTimeout(() => navigate("/NewChat"), 1500);
       
     } catch (error) {
       if (error.response?.data?.detail) {

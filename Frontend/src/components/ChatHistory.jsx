@@ -9,7 +9,7 @@ function ChatHistory() {
 
 return (
   <>
-    <div className="bg-stone-100 h-screen flex">
+    <div className="bg-stone-200 h-screen flex">
       {/* Sidebar */}
       <div className="w-16">
         <ChatSidebar />

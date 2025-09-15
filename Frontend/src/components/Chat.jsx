@@ -180,7 +180,7 @@ const Chat = () => {
   };
 
   return (
-    <div className="bg-stone-100 h-screen flex">
+    <div className="bg-stone-200 h-screen flex">
       {/* Sidebar */}
       <div className="w-16">
         <ChatSidebar />
@@ -220,7 +220,7 @@ const Chat = () => {
           ))}
 
           {isLoading && (
-            <div className="self-start flex items-center gap-2 p-3 bg-gray-50 rounded-xl">
+            <div className="self-start flex items-center gap-2 p-3 bg-gray-200 rounded-xl">
               <Loader className="w-4 h-4 animate-spin text-gray-600" />
               <span className="text-sm text-gray-600">Thinking...</span>
             </div>
@@ -230,7 +230,7 @@ const Chat = () => {
         </div>
 
         {/* Input area */}
-        <div className="p-4 border-t border-gray-200 bg-white">
+        <div className="p-4">
           <ChatInput 
             onSendMessage={handleSendMessage}
             onFileUploaded={handleFileUploaded}
@@ -243,7 +243,7 @@ const Chat = () => {
             disabled={isLoading}
             uploadedFiles={uploadedFiles}
           />
-        </div>
+          </div>
       </div>
     </div>
   );

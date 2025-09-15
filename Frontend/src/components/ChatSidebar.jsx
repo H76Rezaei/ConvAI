@@ -41,7 +41,7 @@ const ChatSidebar = () => {
   return (
     <>
       {/* Original Sidebar */}
-      <div className="w-16 bg-stone-200 flex flex-col justify-between items-center pt-20 h-screen">
+      <div className="w-16 bg-stone-300 flex flex-col justify-between items-center pt-20 h-screen">
         <div className="flex flex-col items-center space-y-4">
 
           <div className="p-2 rounded-full hover:bg-gray-50 transition-colors cursor-pointer">

@@ -221,7 +221,7 @@ const ChatInput = ({
           />
           
           {/* Bottom button row */}
-          <div className="absolute bottom-2 left-0 right-0 flex justify-between items-center px-4">
+          <div className="absolute bottom-4 left-0 right-0 flex justify-between items-center px-4">
             
             {/* Left side - Upload button */}
             <div className="flex items-center">

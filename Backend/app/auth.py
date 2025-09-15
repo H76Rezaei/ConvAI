@@ -17,13 +17,29 @@ security = HTTPBearer()
 
 class AuthManager:
     def __init__(self, db_path: str = None, secret_key: str = None):
-        self.db_path = db_path or os.getenv("TEST_DB_PATH", "users.db")
+        # Use absolute path to avoid issues with working directory
+        if db_path:
+            self.db_path = db_path
+        else:
+            # Get the directory where this file is located
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            # Go up one level to the Backend directory
+            backend_dir = os.path.dirname(current_dir)
+            self.db_path = os.path.join(backend_dir, "users.db")
+        
         self.secret_key = secret_key or os.getenv("JWT_SECRET_KEY", "your-default-secret-key-change-in-production")
         self.init_db()
     
     def init_db(self):
         """Initialize the users table"""
         try:
+            # Ensure the directory exists
+            db_dir = os.path.dirname(self.db_path)
+            if not os.path.exists(db_dir):
+                os.makedirs(db_dir, exist_ok=True)
+                logger.info(f"Created database directory: {db_dir}")
+            
+            logger.info(f"Attempting to connect to database at: {self.db_path}")
             conn = sqlite3.connect(self.db_path)
             cursor = conn.cursor()
             cursor.execute('''
@@ -39,9 +55,14 @@ class AuthManager:
             ''')
             conn.commit()
             conn.close()
-            logger.info("User database initialized successfully")
+            logger.info(f"User database initialized successfully at: {self.db_path}")
+        except sqlite3.OperationalError as e:
+            logger.error(f"SQLite operational error initializing database at {self.db_path}: {e}")
+            logger.error(f"Database directory exists: {os.path.exists(os.path.dirname(self.db_path))}")
+            logger.error(f"Database file exists: {os.path.exists(self.db_path)}")
+            raise
         except Exception as e:
-            logger.error(f"Error initializing user database: {e}")
+            logger.error(f"Unexpected error initializing user database at {self.db_path}: {e}")
             raise
     
     def hash_password(self, password: str, salt: str) -> str:
@@ -82,6 +103,10 @@ class AuthManager:
                 "username": username,
                 "created_at": datetime.now().isoformat()
             }
+        except sqlite3.OperationalError as e:
+            logger.error(f"SQLite operational error creating user: {e}")
+            logger.error(f"Database path: {self.db_path}")
+            return None
         except Exception as e:
             logger.error(f"Error creating user: {e}")
             return None
@@ -123,6 +148,10 @@ class AuthManager:
                 logger.warning(f"Failed authentication attempt for email: {email} - user not found")
                 return None
                 
+        except sqlite3.OperationalError as e:
+            logger.error(f"SQLite operational error authenticating user: {e}")
+            logger.error(f"Database path: {self.db_path}")
+            return None
         except Exception as e:
             logger.error(f"Error authenticating user: {e}")
             return None
