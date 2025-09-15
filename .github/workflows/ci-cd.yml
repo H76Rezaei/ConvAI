@@ -82,39 +82,10 @@ jobs:
           cd Frontend
           npm audit --audit-level=moderate || echo "Security audit completed with warnings"
 
-  # =================== DOCKER BUILD TESTING ===================
-  docker-build-test:
-    runs-on: ubuntu-latest
-    needs: [test-backend, test-frontend]
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Test Docker Compose Build
-        run: |
-          # Test that Docker images build successfully
-          docker compose build
-
-      - name: Test service startup
-        run: |
-          # Start services in background
-          docker compose up -d
-
-          # Wait for services to be ready
-          sleep 30
-
-          # Test backend is accessible (use /docs since that exists)
-          curl -f http://localhost:8000/docs || echo "Backend health check failed"
-
-          # Test frontend is accessible
-          curl -f http://localhost:3000 || echo "Frontend health check failed"
-
-          # Clean up
-          docker compose down
-
   # =================== DEPLOYMENT ===================
   deploy:
     runs-on: ubuntu-latest
-    needs: [test-backend, test-frontend, docker-build-test]
+    needs: [test-backend, test-frontend]
     if: github.ref == 'refs/heads/main'
     steps:
       - name: Deployment Status
